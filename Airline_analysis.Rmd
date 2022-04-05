@@ -1,0 +1,131 @@
+---
+pdf_document: default
+title: "Airlines"
+author: "Miawka26"
+date: "31.03.2022"
+output: pdf_document
+---
+
+
+```{r include = FALSE}
+install.packages("DBI")
+library(DBI)
+
+db <- 'dwbd_flights'
+host_db <- #university database
+db_user <- rstudioapi::askForPassword("Database login")
+db_password <- rstudioapi::askForPassword("Database password")
+con <- dbConnect(RPostgres::Postgres(), dbname = db, host=host_db, user=db_user, password=db_password)  
+dbListTables(con)
+```
+
+**a. What was the average arrival delay?**
+```{sql connection=con}
+SELECT AVG(arr_delay_new) AS avg_delay
+FROM "Flight_delays"
+```
+
+**b. What was the maximum arrival delay?**
+```{sql connection=con}
+SELECT MAX(arr_delay_new) AS max_delay 
+FROM "Flight_delays"
+```
+
+**c. Which flight had the largest arrival delay?**
+```{sql connection=con}
+SELECT carrier,
+       origin_city_name,
+       dest_city_name,
+       fl_date,
+       arr_delay_new
+FROM "Flight_delays"
+order BY COALESCE(arr_delay_new, 0.0) DESC
+LIMIT 1
+```
+
+**d. Which days of the week are the worst for travel?**
+```{sql connection=con}
+SELECT w.weekday_name AS weekday_name, 
+       AVG(arr_delay_new) AS avg_delay
+FROM "Flight_delays" f 
+  INNER JOIN "Weekdays" w 
+    ON f.day_of_week=w.weekday_id 
+GROUP BY w.weekday_name
+ORDER BY AVG(arr_delay_new) desc
+```
+
+**e. Which airline flying from San Francisco (SFO) have the lowest arrival delays?**
+```{sql connection=con}
+SELECT a.airline_name,
+       AVG(f.arr_delay_new) AS avg_delay
+FROM "Flight_delays" f 
+    INNER JOIN "Airlines" a 
+        ON f.airline_id=a.airline_id 
+WHERE f.airline_id IN 
+    (SELECT airline_id 
+    FROM "Flight_delays" 
+    WHERE origin='SFO')
+GROUP BY a.airline_name 
+ORDER BY avg_delay desc
+```
+
+**f. What proportion of airlines has regular delays, i.e., their flight has an average delay of at least 10 minutes?**
+```{sql connection=con}
+SELECT count(DISTINCT f.airline_id)*1.0/count(DISTINCT f1.airline_id)*1.0 AS late_proportion
+FROM "Flight_delays" f
+  INNER JOIN "Flight_delays" f1
+    ON f.fl_num = f1.fl_num
+WHERE f.airline_id IN 
+  (SELECT airline_id
+  FROM "Flight_delays" 
+  GROUP BY airline_id 
+  HAVING avg(arr_delay_new)>10)
+```
+
+**g. How do departure delays affect arrival delays? [Pearson correlation coefficient between departure delay time and arrival delay time].**
+```{sql connection=con}
+SELECT ((SUM(arr_delay_new * dep_delay_new)-(SUM(arr_delay_new) * SUM(dep_delay_new)) / COUNT(*)))
+/(SQRT(SUM(arr_delay_new * arr_delay_new) - (SUM(arr_delay_new) * SUM (arr_delay_new)) / COUNT(*))
+* SQRT(SUM(dep_delay_new * dep_delay_new)-(SUM(dep_delay_new) * SUM(dep_delay_new)) / COUNT(*)))
+AS "Pearsons r"
+FROM "Flight_delays"
+```
+
+**h. Which airline had the largest increase (difference) in average arrival delay during the last week of the month, i.e., between July 1-23 and July 24-31? **
+```{sql connection=con}
+SELECT a.airline_name AS "airline_name",
+       AVG(f2.arr_delay_new)-AVG(f1.arr_delay_new) AS "delay_increase"
+FROM "Flight_delays" f1
+  INNER JOIN "Flight_delays" f2
+    ON f1.airline_id=f2.airline_id 
+  INNER JOIN "Airlines" a
+    ON f1.airline_id=a.airline_id 
+WHERE (f1.DAY_of_month<=23) AND (f2.DAY_of_month>=24)
+GROUP BY a.airline_name 
+ORDER BY AVG(f2.arr_delay_new)-AVG(f1.arr_delay_new) DESC
+LIMIT 1
+```
+
+**i. Which airline flies both SFO → PDX (Portland) and SFO → EUG (Eugene)?**
+```{sql connection=con}
+SELECT DISTINCT(a.airline_name)
+FROM "Flight_delays" f
+  INNER JOIN "Airlines" a
+    ON f.airline_id=a.airline_id 
+WHERE f.origin='SFO' AND  f.dest='PDX' AND f.airline_id IN 
+  (SELECT airline_id 
+  FROM "Flight_delays" 
+  WHERE origin='SFO' AND  dest='EUG')
+```
+
+**j. What is the fastest way to get from Chicago to Stanford, assuming departure after 2:00 pm local time?** 
+```{sql connection=con}
+SELECT origin,
+       dest,
+       AVG(arr_delay_new)
+FROM "Flight_delays" 
+WHERE (origin IN ('MDW','ORD')) AND (dest IN ('SFO','SJC','OAK')) AND (crs_dep_time>1400)
+GROUP BY origin,
+         dest
+ORDER BY AVG(arr_delay_new) DESC
+```
